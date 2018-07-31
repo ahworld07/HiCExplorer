@@ -66,7 +66,7 @@ def parse_arguments(args=None):
                            'http://matplotlib.org/examples/color/colormaps_reference.html',
                            default='viridis')
     parserOpt.add_argument('--rbzScore', '-rbz',
-                           help='Plot rbz-score as a colorbar',
+                           help='Plot rbz-score as a colorbar.',
                            choices=['integrated', 'heatmap', ''],
                            default=''
                            )

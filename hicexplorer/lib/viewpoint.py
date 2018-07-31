@@ -51,7 +51,7 @@ class Viewpoint():
 
         return viewpoints, gene_list
 
-    def readInteractionFile(self, pBedFile):
+    def readInteractionFile(self, pBedFile, pRange=None):
         '''
         Reads an interaction file produced by chicViewpoint. Contains header information, these lines
         start with '#'. 
@@ -78,6 +78,8 @@ class Viewpoint():
 
                 _line = line.strip().split('\t')
                 # relative postion and relative interactions
+                if int(_line[-4]) < pRange[0] or int(_line[-4]) > pRange[1]:
+                    continue
                 interaction_data[int(_line[-4])] = float(_line[-3])
                 z_score[int(_line[-4])] = float(_line[-2])
                 interaction_file_data[int(_line[-4])] = _line
