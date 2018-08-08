@@ -1410,7 +1410,7 @@ class hiCMatrix:
 
         return chrom_sizes
 
-    def intervalListToIntervalTree(self, interval_list):
+    def intervalListToIntervalTree(self, interval_list, pUseValue=None):
         """
         given an ordered list of (chromosome name, start, end)
         this is transformed to a number of interval trees,
@@ -1436,8 +1436,11 @@ class hiCMatrix:
                 chr_start_id = intval_id
                 cut_int_tree[chrom] = IntervalTree()
                 previous_chrom = chrom
+            if pUseValue:
+                cut_int_tree[chrom].add(Interval(start, end, float(intval[3])))
 
-            cut_int_tree[chrom].add(Interval(start, end, intval_id))
+            else:
+                cut_int_tree[chrom].add(Interval(start, end, intval_id))
 
             intval_id += 1
         chrbin_boundaries[chrom] = (chr_start_id, intval_id)
