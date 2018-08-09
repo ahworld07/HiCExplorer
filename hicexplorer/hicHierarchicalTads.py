@@ -68,18 +68,20 @@ def readPcaFile(pPcaFile):
 
     return pca
 
+
 def createList(pClusterNode, pList):
     if pClusterNode.childLeft is not None:
         pList.append(createList(pClusterNode.childLeft, pList))
     if pClusterNode.childRight is not None:
         pList.append(createList(pClusterNode.childRight, pList))
-    return [pClusterNode.chromosome, 
-    pClusterNode.start, 
-    pClusterNode.end, 
-    pClusterNode.id, 
-    pClusterNode.valueRight, 
-    pClusterNode.start, 
-    pClusterNode.end]
+    return [pClusterNode.chromosome,
+            pClusterNode.start,
+            pClusterNode.end,
+            pClusterNode.id,
+            pClusterNode.valueRight,
+            pClusterNode.start,
+            pClusterNode.end]
+
 
 def writeDomainsFile(pList, pName):
     with open(pName, 'w') as file:
@@ -90,6 +92,8 @@ def writeDomainsFile(pList, pName):
                 element[4], element[5],
                 element[6]
             ))
+
+
 def print_to_bash(pClusterNode):
     # chromosome = pChromosome
     #     self.start = pStart
@@ -128,40 +132,39 @@ def main(args=None):
     # for tad in tads_data:
     #     log.debug('tads_data {} {} '.format(tad.valueLeft, tad.valueRight))
 
-    log.debug('pca_tree {}'.format(pca_tree['chr1'][135045000]))
+    # log.debug('pca_tree {}'.format(pca_tree['chr1'][135045000]))
     #
     _candidate_cluster = []
     node_ids = len(tads_data)
     for i in range(len(tads_data)):
         if i < len(tads_data) - 1:
-            # TODO case handling if start pos is not matching with bin border of pca
 
             pca_value1 = list(pca_tree['chr1'][tads_data[i].start])  # [0].data
-            # log.debug('pca-value1 {}'.format(pca_value1))
-            if len(pca_value1) == 0:
+            pca_value2 = list(pca_tree['chr1'][tads_data[i + 1].start])
+            if len(pca_value1) == 0 or len(pca_value2) == 0:
                 _candidate_cluster.append(tads_data[i])
-
-                log.debug("pca1 zero size {}".format(tads_data[i].start))
                 continue
-            else:
-                pca_value1 = pca_value1[0].data
+            pca_value1 = pca_value1[0].data
+            pca_value2 = pca_value2[0].data
 
-            pca_value2 = list(pca_tree['chr1'][tads_data[i + 1].start])  # [0].data
-            # log.debug('pca-value2 {}'.format(pca_value2))
-
-            if len(pca_value2) == 0:
-                continue
-                log.debug("pca2 zero size {}".format(tads_data[i + 1].start))
-            else:
-                pca_value2 = pca_value2[0].data
-
-            # log.debug('pca_valiie1 {}'.format(pca_value2))
             if np.sign(pca_value1) == np.sign(pca_value2):
                 _candidate_cluster.append(tads_data[i])
             else:
-                # log.debug('_candidate_cluster {}'.format(_candidate_cluster))
+                _candidate_cluster.append(tads_data[i])
                 compartment_split.append(_candidate_cluster)
                 _candidate_cluster = []
+        else:
+            pca_value1 = list(pca_tree['chr1'][tads_data[i].start])
+            pca_value2 = list(pca_tree['chr1'][tads_data[i - 1].start])
+            if len(pca_value1) == 0 or len(pca_value2) == 0:
+                compartment_split[-1].append(tads_data[i])
+                continue
+            pca_value1 = pca_value1[0].data
+            pca_value2 = pca_value2[0].data
+            if np.sign(pca_value1) == np.sign(pca_value2):
+                compartment_split[-1].append(tads_data[i])
+            else:
+                compartment_split.append([tads_data[i]])
 
     clustering_finished = False
 
@@ -180,7 +183,7 @@ def main(args=None):
             for i, tad in enumerate(split):
                 # 1 is right element, 0 is left element
                 _preference = 0
-                
+
                 if i == 0:
                     _preference = 1
                 elif i == len(split) - 1:
@@ -188,10 +191,9 @@ def main(args=None):
                 elif tad.valueLeft < tad.valueRight:
                     # preference to right element
                     _preference = 1
-                
+
                 preferences.append(_preference)
-            
-       
+
             for i in range(len(split)):
                 if i < len(split) - 1:
 
@@ -217,7 +219,6 @@ def main(args=None):
                         _new_parent_nodes.append(clusterNode)
             merge_ids.append(_merged_ids)
             new_parent_nodes.append(_new_parent_nodes)
-      
 
         for i, split in enumerate(merge_ids):
             for j, ids in enumerate(split):
@@ -243,11 +244,11 @@ def main(args=None):
     cluster_list = []
 
     for cluster in compartment_split:
-        log.debug('cluster parent node {}'.format(cluster))
+        # log.debug('cluster parent node {}'.format(cluster))
         if len(cluster) != 0:
-            print_to_bash(cluster[0])
+            # print_to_bash(cluster[0])
             cluster_list.append(createList(cluster[0], cluster_list))
-    
-    log.debug('cluster_list {}'.format(cluster_list))
+
+    # log.debug('cluster_list {}'.format(cluster_list))
 
     writeDomainsFile(cluster_list, args.outFileName)
