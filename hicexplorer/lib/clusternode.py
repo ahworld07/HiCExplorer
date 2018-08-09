@@ -1,3 +1,5 @@
+from copy import deepcopy
+
 class ClusterNode():
 
     def __init__(self, pChromosome, pStart, pEnd, pValueLeft, pValueRight, pParent=None, pChildLeft=None, pChildRight=None,
@@ -10,7 +12,7 @@ class ClusterNode():
         self.childRight = pChildRight
         self.valueRight = pValueRight
         self.valueLeft = pValueLeft
-        self.parentId = pParentId
-        self.id = pId
-        self.childLeftId = pChildLeftId
-        self.childRightId = pChildRightId
+        self.parentId = deepcopy(pParentId)
+        self.id = deepcopy(pId)
+        self.childLeftId = deepcopy(pChildLeftId)
+        self.childRightId = deepcopy(pChildRightId)

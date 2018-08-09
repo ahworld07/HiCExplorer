@@ -68,7 +68,28 @@ def readPcaFile(pPcaFile):
 
     return pca
 
+def createList(pClusterNode, pList):
+    if pClusterNode.childLeft is not None:
+        pList.append(createList(pClusterNode.childLeft, pList))
+    if pClusterNode.childRight is not None:
+        pList.append(createList(pClusterNode.childRight, pList))
+    return [pClusterNode.chromosome, 
+    pClusterNode.start, 
+    pClusterNode.end, 
+    pClusterNode.id, 
+    pClusterNode.valueRight, 
+    pClusterNode.start, 
+    pClusterNode.end]
 
+def writeDomainsFile(pList, pName):
+    with open(pName, 'w') as file:
+        for element in pList:
+            file.write('{}\t{}\t{}\t{}\t{}\t.\t{}\t{}\t1,2,3\n'.format(
+                element[0], element[1],
+                element[2], element[3],
+                element[4], element[5],
+                element[6]
+            ))
 def print_to_bash(pClusterNode):
     # chromosome = pChromosome
     #     self.start = pStart
@@ -78,21 +99,14 @@ def print_to_bash(pClusterNode):
     #     self.childRight = pChildRight
     #     self.valueRight = pValueRight
     #     self.valueLeft = pValueLeft
-
-    if pClusterNode.childLeft is None:
-        return
-
     log.debug('id {} parent_id {} chromosome {} start {} end {} valueLeft {} valueRight {}'.format(pClusterNode.id, pClusterNode.parentId, pClusterNode.chromosome, pClusterNode.start,
                                                                                                    pClusterNode.end, pClusterNode.valueLeft,
                                                                                                    pClusterNode.valueRight))
+    if pClusterNode.childLeft is not None:
+        print_to_bash(pClusterNode.childLeft)
 
-    print_to_bash(pClusterNode.childLeft)
-
-    print_to_bash(pClusterNode.childRight)
-
-    # log.debug('id {} parent_id {} chromosome {} start {} end {} valueLeft {} valueRight {}'.format(pClusterNode.id, pClusterNode.parentId, pClusterNode.chromosome, pClusterNode.start,
-    #                                                                                 pClusterNode.end, pClusterNode.valueLeft,
-    #                                                                                 pClusterNode.valueRight))
+    if pClusterNode.childRight is not None:
+        print_to_bash(pClusterNode.childRight)
 
 
 def main(args=None):
@@ -111,7 +125,9 @@ def main(args=None):
     compartment_split = []
     preferences = []
     last_value = 0
-    log.debug('tads_data {}'.format(tads_data[0].start))
+    # for tad in tads_data:
+    #     log.debug('tads_data {} {} '.format(tad.valueLeft, tad.valueRight))
+
     log.debug('pca_tree {}'.format(pca_tree['chr1'][135045000]))
     #
     _candidate_cluster = []
@@ -153,7 +169,7 @@ def main(args=None):
 
         merge_ids = []
         new_parent_nodes = []
-        for split in compartment_split:
+        for k, split in enumerate(compartment_split):
             preferences = []
             _merged_ids = []
             _new_parent_nodes = []
@@ -161,21 +177,21 @@ def main(args=None):
                 merge_ids.append(_merged_ids)
                 new_parent_nodes.append(_new_parent_nodes)
                 continue
-            for i in range(len(split)):
+            for i, tad in enumerate(split):
                 # 1 is right element, 0 is left element
-                _preference = 1
-
-                if i > 0 and i < len(split) - 1:
-                    difference_left = abs(abs(split[i].valueLeft) - abs(split[i - 1].valueRight))
-                    difference_right = abs(abs(split[i].valueRight) - abs(split[i + 1].valueLeft))
-                    if difference_left < difference_right:
-                        _preference = 0
+                _preference = 0
+                
+                if i == 0:
+                    _preference = 1
                 elif i == len(split) - 1:
                     _preference = 0
-
+                elif tad.valueLeft < tad.valueRight:
+                    # preference to right element
+                    _preference = 1
+                
                 preferences.append(_preference)
-            log.debug('preferences {}'.format(preferences))
-            # _merged_ids = []
+            
+       
             for i in range(len(split)):
                 if i < len(split) - 1:
 
@@ -201,9 +217,7 @@ def main(args=None):
                         _new_parent_nodes.append(clusterNode)
             merge_ids.append(_merged_ids)
             new_parent_nodes.append(_new_parent_nodes)
-        log.debug('First clustering phase done!')
-        log.debug('mege_ids {}'.format(merge_ids))
-        log.debug('new_parent_nodes {}'.format(new_parent_nodes))
+      
 
         for i, split in enumerate(merge_ids):
             for j, ids in enumerate(split):
@@ -226,44 +240,14 @@ def main(args=None):
                 clustering_finished = False
                 break
 
+    cluster_list = []
+
     for cluster in compartment_split:
         log.debug('cluster parent node {}'.format(cluster))
         if len(cluster) != 0:
             print_to_bash(cluster[0])
-    # log.debug("compartment_split {}".format(compartment_split))
-    # for chromosome in pca_tree:
-    #     for i, element in enumerate(pca_tree[chromosome]):
+            cluster_list.append(createList(cluster[0], cluster_list))
+    
+    log.debug('cluster_list {}'.format(cluster_list))
 
-    #         same_compartment_segment = []
-    #         if np.sign(element[2]) == np.sign(last_value):
-    #             same_compartment_segment.append(domain_tree[chromosome][i])
-    #             log.debug('same compartment')
-    #         else:
-    #             compartment_split.append(same_compartment_segment)
-    #             same_compartment_segment = []
-    #             same_compartment_segment.append(domain_tree[chromosome][i])
-
-    #         last_value = element[2]
-
-    # log.debug("compartment_split {}".format(compartment_split))
-    # for chromosome in domain_tree:
-    #     for i in range(len(domain_tree[chromosome])):
-    #         # 1 is right element, 0 is left element
-    #         _preference = 1
-    #         if i > 0 and i < len(domain_tree[chromosome]) - 1:
-    #             difference_left = abs(abs(domain_tree[chromosome][i][2]) - abs(domain_tree[chromosome][i - 1][2]))
-    #             difference_right = (abs(domain_tree[chromosome][i][2]) - abs(domain_tree[chromosome][i + 1][2]))
-    #             if difference_left < difference_right:
-    #                 _preference = 0
-    #         preferences.append(_preference)
-    #     delete_index = []
-    #     j = 0
-    #     while j < range(len(preferences)):
-    #         if j < len(preferences) - 1:
-    #             if preferences[j] == preferences[j+1]:
-    #                 clusters[j] = [[j, j+1]]
-    #                 domain_tree[chromosome][j][1] = domain_tree[chromosome][j+1][1]
-    #                 domain_treechromosome][j][2] = domain_tree[chromosome][j+1][2]
-    #                 delete_index.append(j+1)
-
-    #     # del dct[key]
+    writeDomainsFile(cluster_list, args.outFileName)
