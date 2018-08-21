@@ -183,6 +183,7 @@ def main(args=None):
 
     # log.debug('pca_tree {}'.format(pca_tree['chr1'][135045000]))
     #
+    log.debug('threshold {}'.format(args.ctcfThreshold))
     for chromosome in chromosome_list:
         _candidate_cluster = []
         node_ids = len(tads_data)
@@ -202,11 +203,28 @@ def main(args=None):
                     # startbin = sorted(self.interval_trees[chrname][startpos:startpos + 1])[0].data
                     # endbin = sorted(self.interval_trees[chrname][endpos:endpos + 1])[0].data
   
-                    ctcf_value = list(ctcf_tree[chromosome][tads_data[i + 1].start])
-                    if not len(ctcf_value) == 0:
-                        if ctcf_value[0].data >= args.ctcfThreshold:
-                            _candidate_cluster.append(tads_data[i])
-                    continue
+                    ctcf_value = list(ctcf_tree[chromosome][tads_data[i].start])
+                    # log.debug('ctcf {}'.format(ctcf_value))
+
+                    # no peak at this position, same sign counts.
+                    if len(ctcf_value) == 0:
+                        _candidate_cluster.append(tads_data[i])
+                        continue
+                   
+                    # peak at position. 
+                    # if value of peak is greater than the threshold, split cluster
+                    # else: continue as normal
+                    if ctcf_value[0].data >= args.ctcfThreshold:
+                        if tads_data[i].start > 150500000 and tads_data[i].start < 160050000:
+                            log.debug('bin: {}'.format(tads_data[i].start))
+                            log.debug('split!!! {} {}'.format(ctcf_value[0].data, args.ctcfThreshold))
+                        _candidate_cluster.append(tads_data[i])
+                        compartment_split.append(_candidate_cluster)
+                        _candidate_cluster = []
+                    else:
+                        _candidate_cluster.append(tads_data[i])
+                    continue  
+                    
                 
                 _candidate_cluster.append(tads_data[i])
                 compartment_split.append(_candidate_cluster)
