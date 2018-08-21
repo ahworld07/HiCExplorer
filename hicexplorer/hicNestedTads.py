@@ -50,32 +50,44 @@ def parse_arguments(args=None):
     return parser
 
 
-def readDomainFile(pDomainFile):
+def readDomainFile(pDomainFile, pChromosomeList):
 
     tads = []
     with open(pDomainFile, 'r') as file:
         for i, line in enumerate(file):
             chrom, start, end, _id, score, _, _, _, _ = line.strip().split('\t')
 
-            if i == 0:
-                value_left = -1000
-            else:
-                value_left = tads[i - 1].valueRight
+            if chrom in pChromosomeList:
 
-            clusterNode = ClusterNode(chrom, int(start), int(end), pValueRight=float(score), pValueLeft=value_left, pId=i)
-            tads.append(clusterNode)
+                if i == 0:
+                    value_left = -1000
+                else:
+                    value_left = tads[i - 1].valueRight
+
+                clusterNode = ClusterNode(chrom, int(start), int(end), pValueRight=float(score), pValueLeft=value_left, pId=i)
+                tads.append(clusterNode)
     return tads
 
 
-def readPcaFile(pPcaFile):
+def readPcaFile(pPcaFile, pChromosomeList):
     pca = []
     with open(pPcaFile, 'r') as file:
         for line in file:
             chrom, start, end, value = line.strip().split('\t')
-            pca.append([chrom, start, end, value])
+            if chrom in pChromosomeList:
+                pca.append([chrom, start, end, value])
 
     return pca
 
+def readCTCFFile(pCtcfFile, pChromosomeList):
+    ctcf = []
+    with open(pCtcfFile, 'r') as file:
+        for line in file:
+            chrom, start, end, value = line.strip().split('\t')
+            if chrom in pChromosomeList:
+                ctcf.append([chrom, int(start), int(end), float(value)])
+
+    return ctcf
 
 def createList(pClusterNode, pList):
     if pClusterNode.childLeft is not None:
@@ -121,26 +133,43 @@ def print_to_bash(pClusterNode):
         print_to_bash(pClusterNode.childRight)
 
 def match_peaks_to_bin(pIntervalTree, pPeaks):
+
+
+    # in which bin is the peak?
+    adjusted_peaks = {}
     for peak in pPeaks:
-        pIntervalTree[pPeaks[0]][pPeaks[0]][0].data += pPeaks[3]
-    return pIntervalTree
+        # log.debug('peak {}'.format(peak))
+        # log.debug('{}'.format( list(pIntervalTree[peak[0]][peak[1]])[0].begin ))
+        
+        _data = list(pIntervalTree[peak[0]][peak[1]])
+        if len(_data) == 0:
+            continue
+        _data = _data[0]
+        if _data.begin  in adjusted_peaks:
+            adjusted_peaks[_data.begin][3] += peak[3]
+        else:
+            adjusted_peaks[_data.begin] = [peak[0], _data.begin, _data.end, peak[3]] 
+        
+    return list(adjusted_peaks.values())
+
 
 def main(args=None):
     args = parse_arguments().parse_args(args)
-
-    pca_data = readPcaFile(args.compartmentFile)
-    tads_data = readDomainFile(args.domainsFile)
-    hic_matrix = hm.hiCMatrix()
-    ctcf_data = readPcaFile(args.ctcfFile)
-
-    pca_tree, _ = hic_matrix.intervalListToIntervalTree(pca_data, True)
-    ctcf_tree = deepcopy(pca_tree)
-    match_peaks_to_bin(ctcf_tree, ctcf_data)
     chromosome_list = []
     if args.chromosomes is not None:
         chromosome_list = args.chromosomes
     else:
         chromosome_list = hic_matrix.getChrNames
+    pca_data = readPcaFile(args.compartmentFile, chromosome_list)
+    tads_data = readDomainFile(args.domainsFile, chromosome_list)
+    hic_matrix = hm.hiCMatrix()
+    ctcf_data = readCTCFFile(args.ctcfFile, chromosome_list)
+
+    pca_tree, _ = hic_matrix.intervalListToIntervalTree(pca_data, True)
+    # ctcf_tree = deepcopy(pca_tree)
+
+    ctcf_tree, _ = hic_matrix.intervalListToIntervalTree(match_peaks_to_bin(pca_tree, ctcf_data), True)
+    # log.debug('{}'.format(ctcf_tree))
     # domain_tree, _ = hic_matrix.intervalListToIntervalTree(domain_data, True)
 
     # log.debug('pca_data {}'.format(pca_tree))
@@ -169,6 +198,10 @@ def main(args=None):
                 pca_value2 = pca_value2[0].data
 
                 if np.sign(pca_value1) == np.sign(pca_value2):
+
+                    # startbin = sorted(self.interval_trees[chrname][startpos:startpos + 1])[0].data
+                    # endbin = sorted(self.interval_trees[chrname][endpos:endpos + 1])[0].data
+  
                     ctcf_value = list(ctcf_tree[chromosome][tads_data[i + 1].start])
                     if not len(ctcf_value) == 0:
                         if ctcf_value[0].data >= args.ctcfThreshold:
