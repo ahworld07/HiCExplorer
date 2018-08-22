@@ -73,6 +73,10 @@ Computes PCA eigenvectors for a Hi-C matrix.
     parserOpt.add_argument('--geneTrack',
                            help='The gene track is needed to decide if the values of the eigenvector need a sign flip or not.',
                            default=None)
+    parserOpt.add_argument('--onlyEigenvectorDecomposition',
+                           help='Compute only the eigenvector decomposition',
+                           action='store_true'
+                           )
     parserOpt.add_argument('--help', '-h', action='help', help='show this help message and exit')
 
     parserOpt.add_argument('--version', action='version',
@@ -153,18 +157,21 @@ def main(args=None):
         chr_range = ma.getChrBinRange(chrname)
 
         submatrix = ma.matrix[chr_range[0]:chr_range[1], chr_range[0]:chr_range[1]]
+        if not args.onlyEigenvectorDecomposition:
+            exp_obs_matrix_ = exp_obs_matrix_lieberman(submatrix, length_chromosome, chromosome_count)
+            exp_obs_matrix_ = convertNansToZeros(csr_matrix(exp_obs_matrix_)).todense()
+            exp_obs_matrix_ = convertInfsToZeros(csr_matrix(exp_obs_matrix_)).todense()
 
-        exp_obs_matrix_ = exp_obs_matrix_lieberman(submatrix, length_chromosome, chromosome_count)
-        exp_obs_matrix_ = convertNansToZeros(csr_matrix(exp_obs_matrix_)).todense()
-        exp_obs_matrix_ = convertInfsToZeros(csr_matrix(exp_obs_matrix_)).todense()
+            pearson_correlation_matrix = np.corrcoef(exp_obs_matrix_)
+            pearson_correlation_matrix = convertNansToZeros(csr_matrix(pearson_correlation_matrix)).todense()
+            pearson_correlation_matrix = convertInfsToZeros(csr_matrix(pearson_correlation_matrix)).todense()
+            corrmatrix = np.cov(pearson_correlation_matrix)
+            corrmatrix = convertNansToZeros(csr_matrix(corrmatrix)).todense()
+            corrmatrix = convertInfsToZeros(csr_matrix(corrmatrix)).todense()
+            evals, eigs = linalg.eig(corrmatrix)
+        else:
+            evals, eigs = linalg.eig(submatrix.todense())
 
-        pearson_correlation_matrix = np.corrcoef(exp_obs_matrix_)
-        pearson_correlation_matrix = convertNansToZeros(csr_matrix(pearson_correlation_matrix)).todense()
-        pearson_correlation_matrix = convertInfsToZeros(csr_matrix(pearson_correlation_matrix)).todense()
-        corrmatrix = np.cov(pearson_correlation_matrix)
-        corrmatrix = convertNansToZeros(csr_matrix(corrmatrix)).todense()
-        corrmatrix = convertInfsToZeros(csr_matrix(corrmatrix)).todense()
-        evals, eigs = linalg.eig(corrmatrix)
         k = args.numberOfEigenvectors
 
         chrom, start, end, _ = zip(*ma.cut_intervals[chr_range[0]:chr_range[1]])

@@ -26,14 +26,14 @@ def parse_arguments(args=None):
     parser.add_argument('--compartmentFile', '-cf',
                         help='A / B compartment file',
                         required=True)
-    parser.add_argument('--ctcfFile', '-ctcf',
-                        help='CTCF data file',
-                        required=True)
-    parser.add_argument('--ctcfThreshold', '-ct',
-                        help='CTCF peak threshold. If a CTCF peak is higher than is value it determines a border, the neighbor is not '
-                        'considered as a potential nesting structure.',
-                        required=True,
-                        type=float)
+    # parser.add_argument('--ctcfFile', '-ctcf',
+    #                     help='CTCF data file',
+    #                     required=True)
+    # parser.add_argument('--ctcfThreshold', '-ct',
+    #                     help='CTCF peak threshold. If a CTCF peak is higher than is value it determines a border, the neighbor is not '
+    #                     'considered as a potential nesting structure.',
+    #                     required=True,
+    #                     type=float)
     parser.add_argument('--outFileName', '-o',
                         help='File name to save the resulting matrix',
                         required=True)
@@ -79,15 +79,15 @@ def readPcaFile(pPcaFile, pChromosomeList):
 
     return pca
 
-def readCTCFFile(pCtcfFile, pChromosomeList):
-    ctcf = []
-    with open(pCtcfFile, 'r') as file:
-        for line in file:
-            chrom, start, end, value = line.strip().split('\t')
-            if chrom in pChromosomeList:
-                ctcf.append([chrom, int(start), int(end), float(value)])
+# def readCTCFFile(pCtcfFile, pChromosomeList):
+#     ctcf = []
+#     with open(pCtcfFile, 'r') as file:
+#         for line in file:
+#             chrom, start, end, value = line.strip().split('\t')
+#             if chrom in pChromosomeList:
+#                 ctcf.append([chrom, int(start), int(end), float(value)])
 
-    return ctcf
+#     return ctcf
 
 def createList(pClusterNode, pList):
     if pClusterNode.childLeft is not None:
@@ -163,12 +163,12 @@ def main(args=None):
     pca_data = readPcaFile(args.compartmentFile, chromosome_list)
     tads_data = readDomainFile(args.domainsFile, chromosome_list)
     hic_matrix = hm.hiCMatrix()
-    ctcf_data = readCTCFFile(args.ctcfFile, chromosome_list)
+    # ctcf_data = readCTCFFile(args.ctcfFile, chromosome_list)
 
     pca_tree, _ = hic_matrix.intervalListToIntervalTree(pca_data, True)
     # ctcf_tree = deepcopy(pca_tree)
 
-    ctcf_tree, _ = hic_matrix.intervalListToIntervalTree(match_peaks_to_bin(pca_tree, ctcf_data), True)
+    # ctcf_tree, _ = hic_matrix.intervalListToIntervalTree(match_peaks_to_bin(pca_tree, ctcf_data), True)
     # log.debug('{}'.format(ctcf_tree))
     # domain_tree, _ = hic_matrix.intervalListToIntervalTree(domain_data, True)
 
@@ -199,31 +199,32 @@ def main(args=None):
                 pca_value2 = pca_value2[0].data
 
                 if np.sign(pca_value1) == np.sign(pca_value2):
-
+                    _candidate_cluster.append(tads_data[i])
+                    continue
                     # startbin = sorted(self.interval_trees[chrname][startpos:startpos + 1])[0].data
                     # endbin = sorted(self.interval_trees[chrname][endpos:endpos + 1])[0].data
   
-                    ctcf_value = list(ctcf_tree[chromosome][tads_data[i].start])
-                    # log.debug('ctcf {}'.format(ctcf_value))
+                    # ctcf_value = list(ctcf_tree[chromosome][tads_data[i].start])
+                    # # log.debug('ctcf {}'.format(ctcf_value))
 
-                    # no peak at this position, same sign counts.
-                    if len(ctcf_value) == 0:
-                        _candidate_cluster.append(tads_data[i])
-                        continue
+                    # # no peak at this position, same sign counts.
+                    # if len(ctcf_value) == 0:
+                    #     _candidate_cluster.append(tads_data[i])
+                    #     continue
                    
-                    # peak at position. 
-                    # if value of peak is greater than the threshold, split cluster
-                    # else: continue as normal
-                    if ctcf_value[0].data >= args.ctcfThreshold:
-                        if tads_data[i].start > 150500000 and tads_data[i].start < 160050000:
-                            log.debug('bin: {}'.format(tads_data[i].start))
-                            log.debug('split!!! {} {}'.format(ctcf_value[0].data, args.ctcfThreshold))
-                        _candidate_cluster.append(tads_data[i])
-                        compartment_split.append(_candidate_cluster)
-                        _candidate_cluster = []
-                    else:
-                        _candidate_cluster.append(tads_data[i])
-                    continue  
+                    # # peak at position. 
+                    # # if value of peak is greater than the threshold, split cluster
+                    # # else: continue as normal
+                    # if ctcf_value[0].data >= args.ctcfThreshold:
+                    #     if tads_data[i].start > 150500000 and tads_data[i].start < 160050000:
+                    #         log.debug('bin: {}'.format(tads_data[i].start))
+                    #         log.debug('split!!! {} {}'.format(ctcf_value[0].data, args.ctcfThreshold))
+                    #     _candidate_cluster.append(tads_data[i])
+                    #     compartment_split.append(_candidate_cluster)
+                    #     _candidate_cluster = []
+                    # else:
+                    #     _candidate_cluster.append(tads_data[i])
+                    # continue  
                     
                 
                 _candidate_cluster.append(tads_data[i])
