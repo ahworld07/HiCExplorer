@@ -13,6 +13,8 @@ from .utilities import expected_interactions_in_distance
 from scipy.sparse import csr_matrix, linalg
 from hicexplorer.utilities import toString
 from hicexplorer.utilities import convertNansToZeros, convertInfsToZeros
+from scipy.stats import normaltest, f_oneway, mannwhitneyu
+from scipy.signal import savgol_filter
 
 def parse_arguments(args=None):
     """
@@ -121,6 +123,13 @@ def compute_zscore_matrix(pMatrix):
             #     log.debug('data[i] {}'.format(data[i]))
     return csr_matrix((data, (instances, features)), shape=(pMatrix.shape[0], pMatrix.shape[1]))
 
+
+def expected_area(pExpected_interactions, pStart, pEnd):
+    distance = pEnd - pStart
+    expected_area = [pExpected_interactions[0:distance+1]] * distance
+    return np.array(expected_area)
+    # for i in range(distance):
+
 def main(args=None):
     args = parse_arguments().parse_args(args)
     hic_matrix = hm.hiCMatrix(pMatrixFile=args.matrix)
@@ -149,22 +158,22 @@ def main(args=None):
 
         slice_start = int(chr_range[0])
 
-        numberOfEigenvectors = 4
+        numberOfEigenvectors = 5
         vecs_list = []
         chrom_list = []
         start_list = []
         end_list = []
         log.debug('Computing z-score matrix')
         z_score_matrix = compute_zscore_matrix(hic_matrix.matrix)
-        mask = z_score_matrix < 0
-        z_score_matrix[mask] = 0
+        # mask = z_score_matrix < 0
+        # z_score_matrix[mask] = 0
         # z_score_matrix *= 1000
         log.debug('Computing z-score matrix...DONE')
         log.debug('Computing eigenvectors')
         window_size_pca = 50
 
         while slice_start < chr_range[1]:
-            submatrix = hic_matrix.matrix[slice_start:slice_start+window_size_pca, slice_start:slice_start+window_size_pca]
+            submatrix = z_score_matrix[slice_start:slice_start+window_size_pca, slice_start:slice_start+window_size_pca]
             corrmatrix = np.cov(submatrix.todense())
             corrmatrix = convertNansToZeros(csr_matrix(corrmatrix)).todense()
             corrmatrix = convertInfsToZeros(csr_matrix(corrmatrix)).todense()
@@ -180,11 +189,23 @@ def main(args=None):
         # if args.geneTrack:
         #     vecs_list = correlateEigenvectorWithGeneTrack(ma, vecs_list, args.geneTrack)
 
-        # vecs_list = np.array(vecs_list).T
-        # sliding window to smooth values
-        # for eigenvector in vecs_list:
+        vecs_list = np.array(vecs_list).T
+        # #sliding window to smooth values
+        # window_size = 3
+        threshold_window = 0.1
+        for eigenvector in vecs_list:
+            i = 0
+            while i < (len(eigenvector)):
+                if np.absolute(eigenvector[i]) < threshold_window:
+                   eigenvector[i] = 0
+                i += 1
 
+        # vecs_list = np.array(vecs_list).real.T
         # vecs_list = np.array(vecs_list).T
+        for i in range(len(vecs_list)):
+            vecs_list[i] = savgol_filter(vecs_list[i], 5, 4)
+
+        vecs_list = np.array(vecs_list).real.T
 
         for idx, outfile in enumerate(args.outFileName):
             assert(len(vecs_list) == len(chrom_list))
@@ -198,10 +219,14 @@ def main(args=None):
 
         #### detect tads: for every sign flip a tad border is reached
         vecs_list = np.array(vecs_list).T
+        # threshold_eigenvector_value = []
+        # for eigenvector in vecs_list:
+        #     threshold_eigenvector_value.append(np.mean(np.absolute(eigenvector)) * 0.2)
+        # threshold_sign = 0.1
+        
 
         tad_list = []
-        
-        for eigenvector in vecs_list:
+        for j, eigenvector in enumerate(vecs_list):
             i = 1
             chrom_start_tad = chrom_list[0]
             start_tad = start_list[0]
@@ -210,16 +235,52 @@ def main(args=None):
                 if np.sign(eigenvector[i]) == np.sign(eigenvector[i+1]):
                     i += 1
                     continue
+                if eigenvector[i] == 0:
+                    i += 1
+                    continue
+                # if np.absolute(eigenvector[i]) < threshold_eigenvector_value[j] or np.absolute(eigenvector[i+1]) < threshold_eigenvector_value[j] :
+                #     i += 1
+                #     continue
                 end_tad = start_list[i+1]
                 tad_list.append([chrom_start_tad, start_tad, end_tad])
                 chrom_start_tad = chrom_list[i+1]
                 start_tad = start_list[i+1]
                 i += 1
 
+
+        # filter to small tads
+        min_tad_size = 10
+
+        tad_list_filtered = []
+        for tad in tad_list:
+            start, end = hic_matrix.getRegionBinRange(tad[0], tad[1], tad[2])
+            if (end - start) < min_tad_size:
+                continue
+            tad_list_filtered.append(tad)
+        # expected_interactions = expected_interactions_in_distance(pLength_chromosome=(chr_range[1] - chr_range[0]), pChromosome_count=21, pSubmatrix=submatrix)
+
+        # for 
         # log.debug('vecs_list {}'.format(vecs_list))
+        # z_score_theshold = 
+        # p_value_threshold = 0.00001
+        # tad_list_filtered = []
+        # for tad in tad_list:
 
+            # start, end = hic_matrix.getRegionBinRange(tad[0], tad[1], tad[2])
+            # tad_area = hic_matrix.matrix[start:end, start:end].toarray().flatten()
+            # expected = expected_area(expected_interactions, start, end).flatten()
+            # # log.debug('start {} end {}'.format(start, end))
+            # # log.debug('len tad_area {}  len expected {}'.format(len(tad_area),  len(expected)))
+            # # log.debug('tad_area[0] {} {}'.format(tad_area[0],len(tad_area[0])))
 
-        writeDomainsFile(tad_list, 'tad_domains_ZscorePCA.bed')
+            # # log.debug('tad_area {}'.format(tad_area))
+            # test_result = mannwhitneyu(tad_area, expected)
+            # pvalue = test_result[1]
+            # if pvalue < p_value_threshold:
+            #     tad_list_filtered.append(tad)
+            # else:
+            #     log.debug('rejected {} p-value {}'.format(tad, pvalue))
+        writeDomainsFile(tad_list_filtered, 'tad_domains_ZscorePCA.bed')
         
 
     # z_score_matrix[np.logical_not(mask)] += 1
@@ -231,11 +292,11 @@ def main(args=None):
     #     new_z_score_matrix.append(np.append(z_score_matrix.diagonal(k=i), [0]*i))
     # new_z_score_matrix = csr_matrix(new_z_score_matrix)
 
-    # hic_matrix_save = hm.hiCMatrix()
+    hic_matrix_save = hm.hiCMatrix()
 
-    # hic_matrix_save.setMatrix(z_score_matrix, hic_matrix.cut_intervals)
+    hic_matrix_save.setMatrix(z_score_matrix, hic_matrix.cut_intervals)
 
-    # hic_matrix_save.save('nested_tads_zscore.cool')
+    hic_matrix_save.save('nested_tads_zscore.cool')
     # corrmatrix = np.cov(new_z_score_matrix)
     # evals, eigs = linalg.eig(new_z_score_matrix.todense())
 
