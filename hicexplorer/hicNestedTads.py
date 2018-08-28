@@ -9,6 +9,10 @@ from .lib import ClusterNode
 import logging
 log = logging.getLogger(__name__)
 from copy import deepcopy
+from .utilities import expected_interactions_in_distance
+from scipy.sparse import csr_matrix, linalg
+from hicexplorer.utilities import toString
+from hicexplorer.utilities import convertNansToZeros, convertInfsToZeros
 
 def parse_arguments(args=None):
     """
@@ -19,13 +23,16 @@ def parse_arguments(args=None):
         description='Computes hierarchical TADs given the TAD boundary file, the TAD score, A/B compartments ')
 
     # define the arguments
-    parser.add_argument('--domainsFile', '-df',
-                        help='domains file of TADs',
+    parser.add_argument('--matrix', '-m',
+                        help='interaction matrix',
                         required=True)
+    # parser.add_argument('--domainsFile', '-df',
+    #                     help='domains file of TADs',
+    #                     required=True)
 
-    parser.add_argument('--compartmentFile', '-cf',
-                        help='A / B compartment file',
-                        required=True)
+    # parser.add_argument('--compartmentFile', '-cf',
+    #                     help='A / B compartment file',
+    #                     required=True)
     # parser.add_argument('--ctcfFile', '-ctcf',
     #                     help='CTCF data file',
     #                     required=True)
@@ -36,7 +43,8 @@ def parse_arguments(args=None):
     #                     type=float)
     parser.add_argument('--outFileName', '-o',
                         help='File name to save the resulting matrix',
-                        required=True)
+                        required=True,
+                        nargs='+')
     parser.add_argument('--chromosomes',
                            help='List of chromosomes to be included in the '
                            'nested TAD computation.',
@@ -50,282 +58,187 @@ def parse_arguments(args=None):
     return parser
 
 
-def readDomainFile(pDomainFile, pChromosomeList):
-
-    tads = []
-    with open(pDomainFile, 'r') as file:
-        for i, line in enumerate(file):
-            chrom, start, end, _id, score, _, _, _, _ = line.strip().split('\t')
-
-            if chrom in pChromosomeList:
-
-                if i == 0:
-                    value_left = -1000
-                else:
-                    value_left = tads[i - 1].valueRight
-
-                clusterNode = ClusterNode(chrom, int(start), int(end), pValueRight=float(score), pValueLeft=value_left, pId=i)
-                tads.append(clusterNode)
-    return tads
-
-
-def readPcaFile(pPcaFile, pChromosomeList):
-    pca = []
-    with open(pPcaFile, 'r') as file:
-        for line in file:
-            chrom, start, end, value = line.strip().split('\t')
-            if chrom in pChromosomeList:
-                pca.append([chrom, start, end, value])
-
-    return pca
-
-# def readCTCFFile(pCtcfFile, pChromosomeList):
-#     ctcf = []
-#     with open(pCtcfFile, 'r') as file:
-#         for line in file:
-#             chrom, start, end, value = line.strip().split('\t')
-#             if chrom in pChromosomeList:
-#                 ctcf.append([chrom, int(start), int(end), float(value)])
-
-#     return ctcf
-
-def createList(pClusterNode, pList):
-    if pClusterNode.childLeft is not None:
-        pList.append(createList(pClusterNode.childLeft, pList))
-    if pClusterNode.childRight is not None:
-        pList.append(createList(pClusterNode.childRight, pList))
-    return [pClusterNode.chromosome,
-            pClusterNode.start,
-            pClusterNode.end,
-            pClusterNode.id,
-            pClusterNode.valueRight,
-            pClusterNode.start,
-            pClusterNode.end]
-
 
 def writeDomainsFile(pList, pName):
     with open(pName, 'w') as file:
         for element in pList:
-            file.write('{}\t{}\t{}\t{}\t{}\t.\t{}\t{}\t1,2,3\n'.format(
+            file.write('{}\t{}\t{}\tx\t-1\t.\t{}\t{}\t1,2,3\n'.format(
                 element[0], element[1],
-                element[2], element[3],
-                element[4], element[5],
-                element[6]
+                element[2], element[1],
+                element[2]
             ))
 
 
-def print_to_bash(pClusterNode):
-    # chromosome = pChromosome
-    #     self.start = pStart
-    #     self.end = pEnd
-    #     self.parent = pParent
-    #     self.childLeft = pChildLeft
-    #     self.childRight = pChildRight
-    #     self.valueRight = pValueRight
-    #     self.valueLeft = pValueLeft
-    log.debug('id {} parent_id {} chromosome {} start {} end {} valueLeft {} valueRight {}'.format(pClusterNode.id, pClusterNode.parentId, pClusterNode.chromosome, pClusterNode.start,
-                                                                                                   pClusterNode.end, pClusterNode.valueLeft,
-                                                                                                   pClusterNode.valueRight))
-    if pClusterNode.childLeft is not None:
-        print_to_bash(pClusterNode.childLeft)
-
-    if pClusterNode.childRight is not None:
-        print_to_bash(pClusterNode.childRight)
-
-def match_peaks_to_bin(pIntervalTree, pPeaks):
+def _sum_per_distance(pSum_per_distance, pData, pDistances, pN, pDistanceThreshold):
+    # list_of_zero = []
+    for i in range(pN):
+        if not np.isnan(pData[i]):
+            if pDistances[i] > pDistanceThreshold:
+                continue
+            pSum_per_distance[pDistances[i]] += pData[i]
+            # if pDistances[i] == 0:
+            #     list_of_zero.append(pData[i])
+    return pSum_per_distance
 
 
-    # in which bin is the peak?
-    adjusted_peaks = {}
-    for peak in pPeaks:
-        # log.debug('peak {}'.format(peak))
-        # log.debug('{}'.format( list(pIntervalTree[peak[0]][peak[1]])[0].begin ))
-        
-        _data = list(pIntervalTree[peak[0]][peak[1]])
-        if len(_data) == 0:
+def compute_zscore_matrix(pMatrix):
+
+    instances, features = pMatrix.nonzero()
+
+    pMatrix.data = pMatrix.data.astype(float)
+    data = pMatrix.data.tolist()
+    distances = np.absolute(instances - features)
+    sigma_2 = np.zeros(pMatrix.shape[0])
+    sum_per_distance = np.zeros(pMatrix.shape[0])
+    distance_threshold = 50
+    sum_per_distance = _sum_per_distance(sum_per_distance, data, distances, len(instances),pDistanceThreshold=distance_threshold)
+    # compute mean
+    max_contacts = np.array(range(pMatrix.shape[0], 0, -1))
+    mean = sum_per_distance / max_contacts
+
+    # compute sigma squared
+    for i in range(len(instances)):
+        if distances[i] > distance_threshold:
             continue
-        _data = _data[0]
-        if _data.begin  in adjusted_peaks:
-            adjusted_peaks[_data.begin][3] += peak[3]
+        if np.isnan(data[i]):
+            sigma_2[distances[i]] += np.square(mean[distances[i]])
         else:
-            adjusted_peaks[_data.begin] = [peak[0], _data.begin, _data.end, peak[3]] 
-        
-    return list(adjusted_peaks.values())
+            sigma_2[distances[i]] += np.square(data[i] - mean[distances[i]])
 
+    sigma_2 /= max_contacts
+    sigma = np.sqrt(sigma_2)
+
+    for i in range(len(instances)):
+        if distances[i] > distance_threshold:
+            data[i] = 0
+            continue
+        if np.isnan(data[i]):
+            data[i] = (0 - mean[distances[i]]) / sigma[distances[i]]
+        else:
+                
+            data[i] = (pMatrix.data[i] - mean[distances[i]]) / sigma[distances[i]]
+            # if distances[i] < 10:
+            #     log.debug('data[i] {}'.format(data[i]))
+    return csr_matrix((data, (instances, features)), shape=(pMatrix.shape[0], pMatrix.shape[1]))
 
 def main(args=None):
     args = parse_arguments().parse_args(args)
+    hic_matrix = hm.hiCMatrix(pMatrixFile=args.matrix)
+
     chromosome_list = []
     if args.chromosomes is not None:
         chromosome_list = args.chromosomes
     else:
-        chromosome_list = hic_matrix.getChrNames
-    pca_data = readPcaFile(args.compartmentFile, chromosome_list)
-    tads_data = readDomainFile(args.domainsFile, chromosome_list)
-    hic_matrix = hm.hiCMatrix()
-    # ctcf_data = readCTCFFile(args.ctcfFile, chromosome_list)
+        chromosome_list = hic_matrix.getChrNames()
+    # pca_data = readPcaFile(args.compartmentFile, chromosome_list)
+    # tads_data = readDomainFile(args.domainsFile, chromosome_list)
+    # # ctcf_data = readCTCFFile(args.ctcfFile, chromosome_list)
 
-    pca_tree, _ = hic_matrix.intervalListToIntervalTree(pca_data, True)
-    # ctcf_tree = deepcopy(pca_tree)
+    # # pca_tree, _ = hic_matrix.intervalListToIntervalTree(pca_data, True)
 
-    # ctcf_tree, _ = hic_matrix.intervalListToIntervalTree(match_peaks_to_bin(pca_tree, ctcf_data), True)
-    # log.debug('{}'.format(ctcf_tree))
-    # domain_tree, _ = hic_matrix.intervalListToIntervalTree(domain_data, True)
+    # # compute expected values per genomic distance
+    # length_chromosome = hic_matrix.matrix.shape[0]
+    # chromosome_count = len(chromosome_list)
+    # for chromosome in chromosome_list:
 
-    # log.debug('pca_data {}'.format(pca_tree))
-    # log.debug('domain_data {}'.format(domain_tree))
-
-    compartment_split = []
-    preferences = []
-    last_value = 0
-    # for tad in tads_data:
-    #     log.debug('tads_data {} {} '.format(tad.valueLeft, tad.valueRight))
-
-    # log.debug('pca_tree {}'.format(pca_tree['chr1'][135045000]))
-    #
-    log.debug('threshold {}'.format(args.ctcfThreshold))
     for chromosome in chromosome_list:
-        _candidate_cluster = []
-        node_ids = len(tads_data)
-        for i in range(len(tads_data)):
-            if i < len(tads_data) - 1:
+        chr_range = hic_matrix.getChrBinRange(chromosome)
+        log.debug('chr_range {}'.format(chr_range))
+        log.debug('chr_range[0] {}'.format(chr_range[0]))
+        log.debug('type chr_range {}'.format(type(chr_range[0])))
 
-                pca_value1 = list(pca_tree[chromosome][tads_data[i].start])  # [0].data
-                pca_value2 = list(pca_tree[chromosome][tads_data[i + 1].start])
-                if len(pca_value1) == 0 or len(pca_value2) == 0:
-                    _candidate_cluster.append(tads_data[i])
+        slice_start = int(chr_range[0])
+
+        numberOfEigenvectors = 4
+        vecs_list = []
+        chrom_list = []
+        start_list = []
+        end_list = []
+        log.debug('Computing z-score matrix')
+        z_score_matrix = compute_zscore_matrix(hic_matrix.matrix)
+        mask = z_score_matrix < 0
+        z_score_matrix[mask] = 0
+        # z_score_matrix *= 1000
+        log.debug('Computing z-score matrix...DONE')
+        log.debug('Computing eigenvectors')
+        window_size_pca = 50
+
+        while slice_start < chr_range[1]:
+            submatrix = hic_matrix.matrix[slice_start:slice_start+window_size_pca, slice_start:slice_start+window_size_pca]
+            corrmatrix = np.cov(submatrix.todense())
+            corrmatrix = convertNansToZeros(csr_matrix(corrmatrix)).todense()
+            corrmatrix = convertInfsToZeros(csr_matrix(corrmatrix)).todense()
+            eigenvalues, eigenvectors = linalg.eigs(corrmatrix, k=numberOfEigenvectors)
+
+            chrom, start, end, _ = zip(*hic_matrix.cut_intervals[slice_start:slice_start+window_size_pca])
+            vecs_list += eigenvectors[:, :numberOfEigenvectors].tolist()
+
+            chrom_list += chrom
+            start_list += start
+            end_list += end
+            slice_start += window_size_pca
+        # if args.geneTrack:
+        #     vecs_list = correlateEigenvectorWithGeneTrack(ma, vecs_list, args.geneTrack)
+
+        # vecs_list = np.array(vecs_list).T
+        # sliding window to smooth values
+        # for eigenvector in vecs_list:
+
+        # vecs_list = np.array(vecs_list).T
+
+        for idx, outfile in enumerate(args.outFileName):
+            assert(len(vecs_list) == len(chrom_list))
+
+            with open(outfile, 'w') as fh:
+                for i, value in enumerate(vecs_list):
+                    if len(value) == numberOfEigenvectors:
+                        if isinstance(value[idx], np.complex):
+                            value[idx] = value[idx].real
+                        fh.write("{}\t{}\t{}\t{:.12f}\n".format(toString(chrom_list[i]), start_list[i], end_list[i], value[idx]))
+
+        #### detect tads: for every sign flip a tad border is reached
+        vecs_list = np.array(vecs_list).T
+
+        tad_list = []
+        
+        for eigenvector in vecs_list:
+            i = 1
+            chrom_start_tad = chrom_list[0]
+            start_tad = start_list[0]
+            end_tad = None
+            while i < len(eigenvector) - 1:
+                if np.sign(eigenvector[i]) == np.sign(eigenvector[i+1]):
+                    i += 1
                     continue
-                pca_value1 = pca_value1[0].data
-                pca_value2 = pca_value2[0].data
+                end_tad = start_list[i+1]
+                tad_list.append([chrom_start_tad, start_tad, end_tad])
+                chrom_start_tad = chrom_list[i+1]
+                start_tad = start_list[i+1]
+                i += 1
 
-                if np.sign(pca_value1) == np.sign(pca_value2):
-                    _candidate_cluster.append(tads_data[i])
-                    continue
-                    # startbin = sorted(self.interval_trees[chrname][startpos:startpos + 1])[0].data
-                    # endbin = sorted(self.interval_trees[chrname][endpos:endpos + 1])[0].data
-  
-                    # ctcf_value = list(ctcf_tree[chromosome][tads_data[i].start])
-                    # # log.debug('ctcf {}'.format(ctcf_value))
+        # log.debug('vecs_list {}'.format(vecs_list))
 
-                    # # no peak at this position, same sign counts.
-                    # if len(ctcf_value) == 0:
-                    #     _candidate_cluster.append(tads_data[i])
-                    #     continue
-                   
-                    # # peak at position. 
-                    # # if value of peak is greater than the threshold, split cluster
-                    # # else: continue as normal
-                    # if ctcf_value[0].data >= args.ctcfThreshold:
-                    #     if tads_data[i].start > 150500000 and tads_data[i].start < 160050000:
-                    #         log.debug('bin: {}'.format(tads_data[i].start))
-                    #         log.debug('split!!! {} {}'.format(ctcf_value[0].data, args.ctcfThreshold))
-                    #     _candidate_cluster.append(tads_data[i])
-                    #     compartment_split.append(_candidate_cluster)
-                    #     _candidate_cluster = []
-                    # else:
-                    #     _candidate_cluster.append(tads_data[i])
-                    # continue  
-                    
-                
-                _candidate_cluster.append(tads_data[i])
-                compartment_split.append(_candidate_cluster)
-                _candidate_cluster = []
-            else:
-                pca_value1 = list(pca_tree[chromosome][tads_data[i].start])
-                pca_value2 = list(pca_tree[chromosome][tads_data[i - 1].start])
-                if len(pca_value1) == 0 or len(pca_value2) == 0:
-                    compartment_split[-1].append(tads_data[i])
-                    continue
-                pca_value1 = pca_value1[0].data
-                pca_value2 = pca_value2[0].data
-                if np.sign(pca_value1) == np.sign(pca_value2):
-                    compartment_split[-1].append(tads_data[i])
-                else:
-                    compartment_split.append([tads_data[i]])
 
-        clustering_finished = False
+        writeDomainsFile(tad_list, 'tad_domains_ZscorePCA.bed')
+        
 
-        while not clustering_finished:
+    # z_score_matrix[np.logical_not(mask)] += 1
+    # z_score_matrix *= z_score_matrix
+    # z_score_matrix.to
+    # new_z_score_matrix = []
+    # for i in range(50):
+        
+    #     new_z_score_matrix.append(np.append(z_score_matrix.diagonal(k=i), [0]*i))
+    # new_z_score_matrix = csr_matrix(new_z_score_matrix)
 
-            merge_ids = []
-            new_parent_nodes = []
-            for k, split in enumerate(compartment_split):
-                preferences = []
-                _merged_ids = []
-                _new_parent_nodes = []
-                if len(split) == 1:
-                    merge_ids.append(_merged_ids)
-                    new_parent_nodes.append(_new_parent_nodes)
-                    continue
-                for i, tad in enumerate(split):
-                    # 1 is right element, 0 is left element
-                    _preference = 0
+    # hic_matrix_save = hm.hiCMatrix()
 
-                    if i == 0:
-                        _preference = 1
-                    elif i == len(split) - 1:
-                        _preference = 0
-                    elif tad.valueLeft < tad.valueRight:
-                        # preference to right element
-                        _preference = 1
+    # hic_matrix_save.setMatrix(z_score_matrix, hic_matrix.cut_intervals)
 
-                    preferences.append(_preference)
+    # hic_matrix_save.save('nested_tads_zscore.cool')
+    # corrmatrix = np.cov(new_z_score_matrix)
+    # evals, eigs = linalg.eig(new_z_score_matrix.todense())
 
-                for i in range(len(split)):
-                    if i < len(split) - 1:
 
-                        if preferences[i] == 1 and preferences[i + 1] == 0:
-                            clusterNode = ClusterNode(pChromosome=split[i].chromosome,
-                                                    pStart=split[i].start,
-                                                    pEnd=split[i + 1].end,
-                                                    pValueLeft=split[i].valueLeft,
-                                                    pValueRight=split[i + 1].valueRight,
-                                                    pParent=None,
-                                                    pChildLeft=split[i],
-                                                    pChildRight=split[i + 1],
-                                                    pId=node_ids,
-                                                    pChildLeftId=split[i].id,
-                                                    pChildRightId=split[i + 1].id)
-                            split[i].parent = clusterNode
-                            split[i].parentId = node_ids
-                            split[i + 1].parent = clusterNode
-                            split[i + 1].parentId = node_ids
-
-                            node_ids += 1
-                            _merged_ids.append((i, i + 1))
-                            _new_parent_nodes.append(clusterNode)
-                merge_ids.append(_merged_ids)
-                new_parent_nodes.append(_new_parent_nodes)
-
-            for i, split in enumerate(merge_ids):
-                for j, ids in enumerate(split):
-                    compartment_split[i][ids[0]] = new_parent_nodes[i][j]
-                    compartment_split[i][ids[1]] = None
-                for ids in compartment_split[i]:
-                    if ids is None:
-                        compartment_split[i].remove(ids)
-            counter = 0
-            for split in compartment_split:
-                if len(split) == 1:
-                    counter += 1
-            if counter == len(compartment_split):
-                clustering_finished = True
-
-            for _ids in new_parent_nodes:
-                if len(_ids) == 0:
-                    clustering_finished = True
-                else:
-                    clustering_finished = False
-                    break
-
-        cluster_list = []
-
-        for cluster in compartment_split:
-            # log.debug('cluster parent node {}'.format(cluster))
-            if len(cluster) != 0:
-                # print_to_bash(cluster[0])
-                cluster_list.append(createList(cluster[0], cluster_list))
-
-        # log.debug('cluster_list {}'.format(cluster_list))
-
-        writeDomainsFile(cluster_list, args.outFileName + '_' + chromosome)
+    # ctcf_tr
+    # log.debug('tads_data {}'.format(tads_data))
